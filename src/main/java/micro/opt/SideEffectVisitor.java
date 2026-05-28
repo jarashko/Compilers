@@ -71,6 +71,26 @@ public final class SideEffectVisitor implements AstVisitor<Boolean> {
     }
 
     @Override
+    public Boolean visitCallExpression(micro.ast.CallExpression expr) {
+        for (AstExpression arg : expr.arguments) {
+            if (arg.accept(this)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    @Override
+    public Boolean visitFunctionDeclStatement(micro.ast.FunctionDeclStatement stmt) {
+        throw new IllegalStateException();
+    }
+
+    @Override
+    public Boolean visitReturnStatement(micro.ast.ReturnStatement stmt) {
+        throw new IllegalStateException();
+    }
+
+    @Override
     public Boolean visitVarStatement(micro.ast.VarStatement stmt) {
         throw new IllegalStateException();
     }

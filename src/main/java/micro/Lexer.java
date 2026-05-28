@@ -15,6 +15,12 @@ public final class Lexer {
 
     static {
         KEYWORDS.put("var", TokenType.VAR);
+        KEYWORDS.put("function", TokenType.FUNCTION);
+        KEYWORDS.put("return", TokenType.RETURN);
+        KEYWORDS.put("number", TokenType.TYPE_NUMBER);
+        KEYWORDS.put("bool", TokenType.TYPE_BOOL);
+        KEYWORDS.put("string", TokenType.TYPE_STRING);
+        KEYWORDS.put("void", TokenType.TYPE_VOID);
         KEYWORDS.put("print", TokenType.PRINT);
         KEYWORDS.put("if", TokenType.IF);
         KEYWORDS.put("else", TokenType.ELSE);

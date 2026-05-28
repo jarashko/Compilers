@@ -3,17 +3,20 @@ package micro.interp;
 import micro.TokenType;
 import micro.ast.ArrayExpression;
 import micro.ast.AssignExpression;
+import micro.ast.AstExpression;
+import micro.ast.AstStatement;
 import micro.ast.BinaryExpression;
 import micro.ast.BlockStatement;
 import micro.ast.BoolExpression;
-import micro.ast.AstExpression;
+import micro.ast.CallExpression;
 import micro.ast.ExpressionStatement;
+import micro.ast.FunctionDeclStatement;
 import micro.ast.IfStatement;
 import micro.ast.IndexAssignExpression;
 import micro.ast.IndexExpression;
 import micro.ast.NumberExpression;
 import micro.ast.PrintStatement;
-import micro.ast.AstStatement;
+import micro.ast.ReturnStatement;
 import micro.ast.StringExpression;
 import micro.ast.UnaryExpression;
 import micro.ast.VarStatement;
@@ -26,37 +29,40 @@ import java.util.List;
 import java.util.Map;
 
 public final class Interpreter {
-    private static final class Cell {
-        ValueType type;
-        ValueType elementType;
-        Value value;
-
-        boolean initialized() {
-            return value != null;
-        }
-    }
-
-    private final Map<String, Cell> env = new HashMap<>();
+    private final RuntimeEnvironment env = new RuntimeEnvironment();
+    private final Map<String, FunctionInfo> functions = new HashMap<>();
 
     public void interpret(List<AstStatement> program) {
-        for (AstStatement s : program) {
-            execute(s);
+        functions.clear();
+        for (AstStatement stmt : program) {
+            if (stmt instanceof FunctionDeclStatement f) {
+                functions.put(f.name, new FunctionInfo(f.returnType, f.name, f.paramTypes, f.paramNames, f.body));
+            }
+        }
+        for (AstStatement stmt : program) {
+            if (!(stmt instanceof FunctionDeclStatement)) {
+                execute(stmt);
+            }
         }
     }
 
-    private void execute(AstStatement stmt) {
+    public void execute(AstStatement stmt) {
         if (stmt instanceof VarStatement v) {
             declareVariable(v.name, v.initializer);
         } else if (stmt instanceof ExpressionStatement e) {
-            evaluate(e.expression);
+            eval(e.expression);
         } else if (stmt instanceof PrintStatement p) {
-            System.out.println(Value.stringify(evaluate(p.expression)));
+            System.out.println(Value.stringify(eval(p.expression)));
+        } else if (stmt instanceof ReturnStatement r) {
+            handleReturn(r);
         } else if (stmt instanceof BlockStatement b) {
+            env.pushScope();
             for (AstStatement inner : b.statements) {
                 execute(inner);
             }
+            env.popScope();
         } else if (stmt instanceof IfStatement i) {
-            Value cond = evaluate(i.condition);
+            Value cond = eval(i.condition);
             requireBool(cond, "if condition");
             if (cond.asBool()) {
                 execute(i.thenBranch);
@@ -65,29 +71,17 @@ public final class Interpreter {
             }
         } else if (stmt instanceof WhileStatement w) {
             while (true) {
-                Value cond = evaluate(w.condition);
+                Value cond = eval(w.condition);
                 requireBool(cond, "while condition");
-                if (!cond.asBool()) break;
+                if (!cond.asBool()) {
+                    break;
+                }
                 execute(w.body);
             }
         }
     }
 
-    private void declareVariable(String name, AstExpression initializer) {
-        if (env.containsKey(name)) {
-            throw failure("Variable '" + name + "' is already declared.");
-        }
-        Cell c = new Cell();
-        if (initializer != null) {
-            Value v = evaluate(initializer);
-            c.type = v.type;
-            c.elementType = v.type == ValueType.ARRAY ? v.elementType() : null;
-            c.value = v;
-        }
-        env.put(name, c);
-    }
-
-    private Value evaluate(AstExpression expr) {
+    public Value eval(AstExpression expr) {
         if (expr instanceof NumberExpression n) {
             return Value.number(n.value);
         }
@@ -101,13 +95,16 @@ public final class Interpreter {
             return evaluateArrayLiteral(a);
         }
         if (expr instanceof VariableExpression v) {
-            return lookup(v.name);
+            return env.lookup(v.name);
+        }
+        if (expr instanceof CallExpression c) {
+            return callFunction(c);
         }
         if (expr instanceof IndexExpression idx) {
             return evaluateIndex(idx);
         }
         if (expr instanceof UnaryExpression u) {
-            Value r = evaluate(u.right);
+            Value r = eval(u.right);
             if (u.op == TokenType.EXCL) {
                 requireBool(r, "operand of '!'");
                 return Value.bool(!r.asBool());
@@ -122,16 +119,81 @@ public final class Interpreter {
             return evaluateBinary(b);
         }
         if (expr instanceof AssignExpression a) {
-            Value v = evaluate(a.value);
-            assign(a.name, v);
+            Value v = eval(a.value);
+            env.assign(a.name, v);
             return v;
         }
         if (expr instanceof IndexAssignExpression a) {
-            Value v = evaluate(a.value);
+            Value v = eval(a.value);
             storeIndex(a.array, a.index, v);
             return v;
         }
         throw failure("Unknown expression");
+    }
+
+    private void handleReturn(ReturnStatement r) {
+        Value value = r.value == null ? null : eval(r.value);
+        throw new ReturnException(value);
+    }
+
+    private Value callFunction(CallExpression call) {
+        FunctionInfo fn = functions.get(call.name);
+        if (fn == null) {
+            throw failure("Undefined function '" + call.name + "'.");
+        }
+        if (call.arguments.size() != fn.paramNames.size()) {
+            throw failure("Function '" + call.name + "' expects " + fn.paramNames.size()
+                    + " arguments, got " + call.arguments.size());
+        }
+        env.pushScope();
+        try {
+            for (int i = 0; i < fn.paramNames.size(); i++) {
+                Value arg = eval(call.arguments.get(i));
+                if (arg.type != fn.paramTypes.get(i)) {
+                    throw failure("Argument " + (i + 1) + " of '" + call.name + "' must be "
+                            + fn.paramTypes.get(i) + ", got " + arg.type);
+                }
+                RuntimeEnvironment.Cell cell = new RuntimeEnvironment.Cell();
+                cell.type = arg.type;
+                cell.elementType = arg.type == ValueType.ARRAY ? arg.elementType() : null;
+                cell.value = arg;
+                env.declare(fn.paramNames.get(i), cell);
+            }
+            try {
+                execute(fn.body);
+                if (fn.returnType != ValueType.VOID) {
+                    throw failure("Function '" + call.name + "' did not return a value.");
+                }
+                return Value.number(0);
+            } catch (ReturnException ret) {
+                if (fn.returnType == ValueType.VOID) {
+                    if (ret.value != null) {
+                        throw failure("void function '" + call.name + "' cannot return a value.");
+                    }
+                    return Value.number(0);
+                }
+                if (ret.value == null) {
+                    throw failure("Function '" + call.name + "' must return " + fn.returnType);
+                }
+                if (ret.value.type != fn.returnType) {
+                    throw failure("Return type mismatch in '" + call.name + "'.");
+                }
+                return ret.value;
+            }
+        } finally {
+            env.popScope();
+        }
+    }
+
+    private void declareVariable(String name, AstExpression initializer) {
+        RuntimeEnvironment.Cell c = new RuntimeEnvironment.Cell();
+        if (initializer != null) {
+            Value v = eval(initializer);
+            c.type = v.type;
+            c.elementType = v.type == ValueType.ARRAY ? v.elementType() : null;
+            c.value = v;
+        }
+        env.declare(name, c);
     }
 
     private Value evaluateArrayLiteral(ArrayExpression expr) {
@@ -141,7 +203,7 @@ public final class Interpreter {
         List<Value> values = new ArrayList<>();
         ValueType elementType = null;
         for (AstExpression element : expr.elements) {
-            Value v = evaluate(element);
+            Value v = eval(element);
             if (elementType == null) {
                 elementType = v.type;
             } else if (elementType != v.type) {
@@ -153,14 +215,14 @@ public final class Interpreter {
     }
 
     private Value evaluateIndex(IndexExpression expr) {
-        Value array = evaluate(expr.array);
+        Value array = eval(expr.array);
         requireArray(array, "indexing");
         int index = resolveIndex(expr.index, array.asArray().size());
         return array.asArray().get(index);
     }
 
     private void storeIndex(AstExpression arrayExpr, AstExpression indexExpr, Value value) {
-        Value array = evaluate(arrayExpr);
+        Value array = eval(arrayExpr);
         requireArray(array, "index assignment");
         ArrayValue data = array.asArray();
         if (value.type != data.elementType) {
@@ -168,16 +230,10 @@ public final class Interpreter {
         }
         int index = resolveIndex(indexExpr, data.size());
         data.set(index, value);
-        if (arrayExpr instanceof VariableExpression v) {
-            Cell cell = env.get(v.name);
-            if (cell != null) {
-                cell.value = array;
-            }
-        }
     }
 
     private int resolveIndex(AstExpression indexExpr, int length) {
-        Value indexValue = evaluate(indexExpr);
+        Value indexValue = eval(indexExpr);
         requireNumber(indexValue, "array index");
         int index = (int) Math.floor(indexValue.asNumber());
         if (index < 0 || index >= length) {
@@ -188,23 +244,27 @@ public final class Interpreter {
 
     private Value evaluateBinary(BinaryExpression b) {
         if (b.op == TokenType.AND) {
-            Value left = evaluate(b.left);
+            Value left = eval(b.left);
             requireBool(left, "left operand of &&");
-            if (!left.asBool()) return Value.bool(false);
-            Value right = evaluate(b.right);
+            if (!left.asBool()) {
+                return Value.bool(false);
+            }
+            Value right = eval(b.right);
             requireBool(right, "right operand of &&");
             return Value.bool(right.asBool());
         }
         if (b.op == TokenType.OR) {
-            Value left = evaluate(b.left);
+            Value left = eval(b.left);
             requireBool(left, "left operand of ||");
-            if (left.asBool()) return Value.bool(true);
-            Value right = evaluate(b.right);
+            if (left.asBool()) {
+                return Value.bool(true);
+            }
+            Value right = eval(b.right);
             requireBool(right, "right operand of ||");
             return Value.bool(right.asBool());
         }
-        Value left = evaluate(b.left);
-        Value right = evaluate(b.right);
+        Value left = eval(b.left);
+        Value right = eval(b.right);
         if (b.op == TokenType.PLUS) {
             if (left.type == ValueType.STRING || right.type == ValueType.STRING) {
                 return Value.string(Value.stringify(left) + Value.stringify(right));
@@ -216,27 +276,35 @@ public final class Interpreter {
         if (b.op == TokenType.MINUS || b.op == TokenType.STAR || b.op == TokenType.SLASH) {
             requireNumber(left, "left operand of arithmetic");
             requireNumber(right, "right operand of arithmetic");
-            double L = left.asNumber();
-            double R = right.asNumber();
-            if (b.op == TokenType.MINUS) return Value.number(L - R);
-            if (b.op == TokenType.STAR) return Value.number(L * R);
-            return Value.number(L / R);
+            double l = left.asNumber();
+            double r = right.asNumber();
+            if (b.op == TokenType.MINUS) {
+                return Value.number(l - r);
+            }
+            if (b.op == TokenType.STAR) {
+                return Value.number(l * r);
+            }
+            return Value.number(l / r);
         }
         if (b.op == TokenType.EQEQ || b.op == TokenType.NEQ) {
             boolean eq = equalValues(left, right);
-            boolean res = b.op == TokenType.EQEQ ? eq : !eq;
-            return Value.bool(res);
+            return Value.bool(b.op == TokenType.EQEQ ? eq : !eq);
         }
         if (b.op == TokenType.LT || b.op == TokenType.LTEQ || b.op == TokenType.GT || b.op == TokenType.GTEQ) {
             requireNumber(left, "left operand of comparison");
             requireNumber(right, "right operand of comparison");
-            double L = left.asNumber();
-            double R = right.asNumber();
+            double l = left.asNumber();
+            double r = right.asNumber();
             boolean res;
-            if (b.op == TokenType.LT) res = L < R;
-            else if (b.op == TokenType.LTEQ) res = L <= R;
-            else if (b.op == TokenType.GT) res = L > R;
-            else res = L >= R;
+            if (b.op == TokenType.LT) {
+                res = l < r;
+            } else if (b.op == TokenType.LTEQ) {
+                res = l <= r;
+            } else if (b.op == TokenType.GT) {
+                res = l > r;
+            } else {
+                res = l >= r;
+            }
             return Value.bool(res);
         }
         throw failure("Unsupported binary operator: " + b.op);
@@ -266,35 +334,6 @@ public final class Interpreter {
             }
         }
         return true;
-    }
-
-    private void assign(String name, Value value) {
-        Cell cell = env.get(name);
-        if (cell == null) {
-            throw failure("Undefined variable '" + name + "'. Declare with var first.");
-        }
-        if (!cell.initialized()) {
-            cell.type = value.type;
-            cell.elementType = value.type == ValueType.ARRAY ? value.elementType() : null;
-            cell.value = value;
-            return;
-        }
-        if (cell.type != value.type) {
-            throw failure("Type error: cannot assign " + value.type + " to '" + name + "' (" + cell.type + ").");
-        }
-        if (cell.type == ValueType.ARRAY && cell.elementType != value.elementType()) {
-            throw failure("Type error: cannot assign array with element type " + value.elementType()
-                    + " to '" + name + "' (" + cell.elementType + ").");
-        }
-        cell.value = value;
-    }
-
-    private Value lookup(String name) {
-        Cell cell = env.get(name);
-        if (cell == null || !cell.initialized()) {
-            throw failure("Variable '" + name + "' is not initialized.");
-        }
-        return cell.value;
     }
 
     private static void requireNumber(Value v, String ctx) {

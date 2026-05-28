@@ -136,4 +136,26 @@ public final class ReadVariableVisitor implements AstVisitor<Void> {
         expr.value.accept(this);
         return null;
     }
+
+    @Override
+    public Void visitCallExpression(micro.ast.CallExpression expr) {
+        for (AstExpression arg : expr.arguments) {
+            arg.accept(this);
+        }
+        return null;
+    }
+
+    @Override
+    public Void visitFunctionDeclStatement(micro.ast.FunctionDeclStatement stmt) {
+        stmt.body.accept(this);
+        return null;
+    }
+
+    @Override
+    public Void visitReturnStatement(micro.ast.ReturnStatement stmt) {
+        if (stmt.value != null) {
+            stmt.value.accept(this);
+        }
+        return null;
+    }
 }

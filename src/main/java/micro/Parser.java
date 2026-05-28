@@ -17,7 +17,11 @@ import micro.ast.StringExpression;
 import micro.ast.UnaryExpression;
 import micro.ast.VarStatement;
 import micro.ast.VariableExpression;
+import micro.ast.CallExpression;
+import micro.ast.FunctionDeclStatement;
+import micro.ast.ReturnStatement;
 import micro.ast.WhileStatement;
+import micro.interp.ValueType;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -42,15 +46,56 @@ public final class Parser {
         if (match(TokenType.VAR)) {
             return parseVarDeclaration();
         }
+        if (match(TokenType.FUNCTION)) {
+            return parseFunctionDeclaration();
+        }
         return parseStatement();
     }
 
     private AstStatement parseStatement() {
+        if (match(TokenType.RETURN)) {
+            return parseReturnStatement();
+        }
         if (match(TokenType.IF)) return parseIfStatement();
         if (match(TokenType.WHILE)) return parseWhileStatement();
         if (match(TokenType.PRINT)) return parsePrintStatement();
         if (match(TokenType.LBRACE)) return new BlockStatement(parseBlock());
         return parseExpressionStatement();
+    }
+
+    private AstStatement parseFunctionDeclaration() {
+        ValueType returnType = parseType();
+        Token name = consume(TokenType.ID, "Expected function name.");
+        consume(TokenType.LPAREN, "Expected '(' after function name.");
+        List<ValueType> paramTypes = new ArrayList<>();
+        List<String> paramNames = new ArrayList<>();
+        if (!check(TokenType.RPAREN)) {
+            do {
+                paramTypes.add(parseType());
+                Token paramName = consume(TokenType.ID, "Expected parameter name.");
+                paramNames.add(paramName.lexeme());
+            } while (match(TokenType.COMMA));
+        }
+        consume(TokenType.RPAREN, "Expected ')' after parameters.");
+        AstStatement body = parseStatement();
+        return new FunctionDeclStatement(returnType, name.lexeme(), paramTypes, paramNames, body);
+    }
+
+    private AstStatement parseReturnStatement() {
+        AstExpression value = null;
+        if (!check(TokenType.SEMICOLON)) {
+            value = parseExpression();
+        }
+        consume(TokenType.SEMICOLON, "Expected ';' after return.");
+        return new ReturnStatement(value);
+    }
+
+    private ValueType parseType() {
+        if (match(TokenType.TYPE_NUMBER)) return ValueType.NUMBER;
+        if (match(TokenType.TYPE_BOOL)) return ValueType.BOOL;
+        if (match(TokenType.TYPE_STRING)) return ValueType.STRING;
+        if (match(TokenType.TYPE_VOID)) return ValueType.VOID;
+        throw error(peek(), "Expected type (number, bool, string, void).");
     }
 
     private AstStatement parseVarDeclaration() {
@@ -211,7 +256,13 @@ public final class Parser {
             return new NumberExpression(value);
         }
         if (match(TokenType.ID)) {
-            return new VariableExpression(previous().lexeme());
+            String name = previous().lexeme();
+            if (match(TokenType.LPAREN)) {
+                List<AstExpression> args = parseCallArguments();
+                consume(TokenType.RPAREN, "Expected ')' after arguments.");
+                return new CallExpression(name, args);
+            }
+            return new VariableExpression(name);
         }
         if (match(TokenType.LBRACKET)) {
             return parseArrayLiteral();
@@ -222,6 +273,16 @@ public final class Parser {
             return expr;
         }
         throw error(peek(), "Expected expression.");
+    }
+
+    private List<AstExpression> parseCallArguments() {
+        List<AstExpression> args = new ArrayList<>();
+        if (!check(TokenType.RPAREN)) {
+            do {
+                args.add(parseExpression());
+            } while (match(TokenType.COMMA));
+        }
+        return args;
     }
 
     private AstExpression parseArrayLiteral() {

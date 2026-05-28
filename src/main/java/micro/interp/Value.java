@@ -56,6 +56,7 @@ public final class Value {
             case BOOL -> Boolean.toString(v.asBool());
             case STRING -> v.asString();
             case ARRAY -> formatArray(v.asArray());
+            case VOID -> "void";
         };
     }
 

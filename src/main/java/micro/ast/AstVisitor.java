@@ -13,6 +13,10 @@ public interface AstVisitor<T> {
 
     T visitWhileStatement(WhileStatement stmt);
 
+    T visitFunctionDeclStatement(FunctionDeclStatement stmt);
+
+    T visitReturnStatement(ReturnStatement stmt);
+
     T visitNumberExpression(NumberExpression expr);
 
     T visitStringExpression(StringExpression expr);
@@ -32,4 +36,6 @@ public interface AstVisitor<T> {
     T visitIndexExpression(IndexExpression expr);
 
     T visitIndexAssignExpression(IndexAssignExpression expr);
+
+    T visitCallExpression(CallExpression expr);
 }

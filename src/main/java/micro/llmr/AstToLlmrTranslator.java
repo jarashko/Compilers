@@ -180,6 +180,21 @@ public final class AstToLlmrTranslator implements AstVisitor<Void> {
     }
 
     @Override
+    public Void visitCallExpression(micro.ast.CallExpression expr) {
+        throw new UnsupportedOperationException("LLMR backend does not support function calls yet.");
+    }
+
+    @Override
+    public Void visitFunctionDeclStatement(micro.ast.FunctionDeclStatement stmt) {
+        return null;
+    }
+
+    @Override
+    public Void visitReturnStatement(micro.ast.ReturnStatement stmt) {
+        throw new UnsupportedOperationException("LLMR backend does not support return yet.");
+    }
+
+    @Override
     public Void visitIndexAssignExpression(IndexAssignExpression expr) {
         if (expr.array instanceof VariableExpression v) {
             expr.index.accept(this);

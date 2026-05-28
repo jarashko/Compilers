@@ -8,30 +8,27 @@ import micro.ast.AstStatement;
 import micro.ast.BinaryExpression;
 import micro.ast.BlockStatement;
 import micro.ast.BoolExpression;
+import micro.ast.CallExpression;
 import micro.ast.ExpressionStatement;
+import micro.ast.FunctionDeclStatement;
 import micro.ast.IfStatement;
 import micro.ast.IndexAssignExpression;
 import micro.ast.IndexExpression;
 import micro.ast.NumberExpression;
 import micro.ast.PrintStatement;
+import micro.ast.ReturnStatement;
 import micro.ast.StringExpression;
 import micro.ast.UnaryExpression;
 import micro.ast.VarStatement;
 import micro.ast.VariableExpression;
 import micro.ast.WhileStatement;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.Deque;
 import java.util.List;
-import java.util.Map;
 
 public final class SemanticAnalyzer {
-    private static final class VarInfo {
-        ValueType type;
-        ValueType elementType;
-        boolean initialized;
-    }
-
     private static final class TypeResult {
         final ValueType type;
         final ValueType elementType;
@@ -50,14 +47,18 @@ public final class SemanticAnalyzer {
         }
     }
 
-    private final Map<String, VarInfo> symbols = new HashMap<>();
+    private final SymbolTable symbols = new SymbolTable();
     private final List<String> errors = new ArrayList<>();
+    private final Deque<String> functionStack = new ArrayDeque<>();
 
     public void analyze(List<AstStatement> program) {
         errors.clear();
-        symbols.clear();
-        for (AstStatement s : program) {
-            analyzeStatement(s);
+        functionStack.clear();
+        for (AstStatement stmt : program) {
+            registerFunction(stmt);
+        }
+        for (AstStatement stmt : program) {
+            analyzeStatement(stmt);
         }
         if (!errors.isEmpty()) {
             List<String> prefixed = new ArrayList<>();
@@ -68,17 +69,33 @@ public final class SemanticAnalyzer {
         }
     }
 
+    private void registerFunction(AstStatement stmt) {
+        if (stmt instanceof FunctionDeclStatement f) {
+            if (symbols.lookupFunction(f.name) != null) {
+                error("Function '" + f.name + "' is already declared.");
+                return;
+            }
+            symbols.registerFunction(new FunctionInfo(f.returnType, f.name, f.paramTypes, f.paramNames, f.body));
+        }
+    }
+
     private void analyzeStatement(AstStatement stmt) {
-        if (stmt instanceof VarStatement v) {
+        if (stmt instanceof FunctionDeclStatement f) {
+            analyzeFunctionBody(f);
+        } else if (stmt instanceof VarStatement v) {
             analyzeVarDeclaration(v.name, v.initializer);
         } else if (stmt instanceof ExpressionStatement e) {
             inferExpr(e.expression);
         } else if (stmt instanceof PrintStatement p) {
             inferExpr(p.expression);
+        } else if (stmt instanceof ReturnStatement r) {
+            analyzeReturn(r);
         } else if (stmt instanceof BlockStatement b) {
+            symbols.pushScope();
             for (AstStatement inner : b.statements) {
                 analyzeStatement(inner);
             }
+            symbols.popScope();
         } else if (stmt instanceof IfStatement i) {
             TypeResult ct = inferExpr(i.condition);
             if (ct.type != ValueType.BOOL) {
@@ -97,19 +114,69 @@ public final class SemanticAnalyzer {
         }
     }
 
-    private void analyzeVarDeclaration(String name, AstExpression initializer) {
-        if (symbols.containsKey(name)) {
-            error("Variable '" + name + "' is already declared.");
+    private void analyzeFunctionBody(FunctionDeclStatement f) {
+        functionStack.push(f.name);
+        symbols.pushScope();
+        for (int i = 0; i < f.paramNames.size(); i++) {
+            SymbolTable.VarInfo info = new SymbolTable.VarInfo();
+            info.type = f.paramTypes.get(i);
+            info.initialized = true;
+            try {
+                symbols.declareVar(f.paramNames.get(i), info);
+            } catch (IllegalStateException e) {
+                error(e.getMessage());
+            }
+        }
+        analyzeStatement(f.body);
+        symbols.popScope();
+        functionStack.pop();
+    }
+
+    private void analyzeReturn(ReturnStatement r) {
+        if (functionStack.isEmpty()) {
+            error("return is only allowed inside a function.");
             return;
         }
-        VarInfo info = new VarInfo();
-        if (initializer != null) {
-            TypeResult tr = inferExpr(initializer);
-            info.type = tr.type;
-            info.elementType = tr.elementType;
-            info.initialized = true;
+        FunctionInfo current = currentFunction();
+        if (current == null) {
+            return;
         }
-        symbols.put(name, info);
+        if (r.value == null) {
+            if (current.returnType != ValueType.VOID) {
+                error("function '" + current.name + "' must return " + current.returnType);
+            }
+            return;
+        }
+        TypeResult rt = inferExpr(r.value);
+        if (current.returnType == ValueType.VOID) {
+            error("void function '" + current.name + "' cannot return a value");
+            return;
+        }
+        if (rt.type != current.returnType) {
+            error("return type mismatch in '" + current.name + "': expected " + current.returnType + ", got " + rt.type);
+        }
+    }
+
+    private FunctionInfo currentFunction() {
+        if (functionStack.isEmpty()) {
+            return null;
+        }
+        return symbols.lookupFunction(functionStack.peek());
+    }
+
+    private void analyzeVarDeclaration(String name, AstExpression initializer) {
+        try {
+            SymbolTable.VarInfo info = new SymbolTable.VarInfo();
+            if (initializer != null) {
+                TypeResult tr = inferExpr(initializer);
+                info.type = tr.type;
+                info.elementType = tr.elementType;
+                info.initialized = true;
+            }
+            symbols.declareVar(name, info);
+        } catch (IllegalStateException e) {
+            error(e.getMessage());
+        }
     }
 
     private TypeResult inferExpr(AstExpression expr) {
@@ -126,7 +193,7 @@ public final class SemanticAnalyzer {
             return inferArrayLiteral(a);
         }
         if (expr instanceof VariableExpression v) {
-            VarInfo info = symbols.get(v.name);
+            SymbolTable.VarInfo info = symbols.lookupVar(v.name);
             if (info == null) {
                 error("Undefined variable '" + v.name + "'.");
                 return TypeResult.scalar(ValueType.NUMBER);
@@ -139,6 +206,9 @@ public final class SemanticAnalyzer {
                 return TypeResult.array(info.elementType);
             }
             return TypeResult.scalar(info.type);
+        }
+        if (expr instanceof CallExpression c) {
+            return inferCall(c);
         }
         if (expr instanceof IndexExpression idx) {
             return inferIndex(idx);
@@ -175,6 +245,29 @@ public final class SemanticAnalyzer {
         }
         error("Unknown expression type");
         return TypeResult.scalar(ValueType.NUMBER);
+    }
+
+    private TypeResult inferCall(CallExpression c) {
+        FunctionInfo fn = symbols.lookupFunction(c.name);
+        if (fn == null) {
+            error("Undefined function '" + c.name + "'.");
+            return TypeResult.scalar(ValueType.NUMBER);
+        }
+        if (c.arguments.size() != fn.paramTypes.size()) {
+            error("Function '" + c.name + "' expects " + fn.paramTypes.size() + " arguments, got " + c.arguments.size());
+        }
+        int n = Math.min(c.arguments.size(), fn.paramTypes.size());
+        for (int i = 0; i < n; i++) {
+            TypeResult arg = inferExpr(c.arguments.get(i));
+            if (arg.type != fn.paramTypes.get(i)) {
+                error("Argument " + (i + 1) + " of '" + c.name + "' must be " + fn.paramTypes.get(i) + ", got " + arg.type);
+            }
+        }
+        if (fn.returnType == ValueType.VOID) {
+            error("void function '" + c.name + "' cannot be used as an expression");
+            return TypeResult.scalar(ValueType.NUMBER);
+        }
+        return TypeResult.scalar(fn.returnType);
     }
 
     private TypeResult inferArrayLiteral(ArrayExpression expr) {
@@ -278,7 +371,7 @@ public final class SemanticAnalyzer {
     }
 
     private void applyAssign(String name, TypeResult valueType) {
-        VarInfo cell = symbols.get(name);
+        SymbolTable.VarInfo cell = symbols.lookupVar(name);
         if (cell == null) {
             error("Undefined variable '" + name + "'. Declare with var first.");
             return;

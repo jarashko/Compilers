@@ -1,0 +1,15 @@
+function number add(number a, number b) {
+    return a + b;
+}
+
+function number factorial(number n) {
+    if (n <= 1) {
+        return 1;
+    }
+    return n * factorial(n - 1);
+}
+
+var x = 3 * 4 + 2;
+print x;
+print add(5, 7);
+print factorial(5);

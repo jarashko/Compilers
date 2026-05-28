@@ -183,6 +183,21 @@ public final class DeadCodeEliminator implements AstVisitor<AstStatement> {
         throw new IllegalStateException();
     }
 
+    @Override
+    public AstStatement visitCallExpression(micro.ast.CallExpression expr) {
+        throw new IllegalStateException();
+    }
+
+    @Override
+    public AstStatement visitFunctionDeclStatement(micro.ast.FunctionDeclStatement stmt) {
+        return stmt;
+    }
+
+    @Override
+    public AstStatement visitReturnStatement(micro.ast.ReturnStatement stmt) {
+        return stmt;
+    }
+
     private AstExpression foldExpr(AstExpression expr) {
         Optional<Value> v = constants.eval(expr);
         if (v.isEmpty()) {
@@ -194,6 +209,7 @@ public final class DeadCodeEliminator implements AstVisitor<AstStatement> {
             case BOOL -> new BoolExpression(value.asBool());
             case STRING -> new micro.ast.StringExpression(value.asString());
             case ARRAY -> expr;
+            case VOID -> expr;
         };
     }
 }

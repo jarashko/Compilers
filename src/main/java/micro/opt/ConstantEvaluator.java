@@ -159,6 +159,21 @@ public final class ConstantEvaluator implements AstVisitor<Optional<Value>> {
     }
 
     @Override
+    public Optional<Value> visitCallExpression(micro.ast.CallExpression expr) {
+        return Optional.empty();
+    }
+
+    @Override
+    public Optional<Value> visitFunctionDeclStatement(micro.ast.FunctionDeclStatement stmt) {
+        throw new IllegalStateException();
+    }
+
+    @Override
+    public Optional<Value> visitReturnStatement(micro.ast.ReturnStatement stmt) {
+        throw new IllegalStateException();
+    }
+
+    @Override
     public Optional<Value> visitVarStatement(micro.ast.VarStatement stmt) {
         throw new IllegalStateException();
     }
