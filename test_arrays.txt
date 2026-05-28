@@ -1,0 +1,6 @@
+var nums = [10, 20, 30];
+print nums[0];
+print nums[1];
+nums[2] = 99;
+print nums[2];
+print nums;

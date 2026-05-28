@@ -1,0 +1,7 @@
+var x = 5;
+var s1 = "n=" + x;
+var s2 = 10 + " items";
+var s3 = "pi~" + 3;
+print s1;
+print s2;
+print s3;

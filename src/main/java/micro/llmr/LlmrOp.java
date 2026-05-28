@@ -1,0 +1,31 @@
+package micro.llmr;
+
+public enum LlmrOp {
+    LABEL,
+    JUMP,
+    JUMP_IF_FALSE,
+    JUMP_IF_TRUE,
+    PRINT,
+    POP,
+    LOAD_CONST,
+    LOAD_VAR,
+    STORE_VAR,
+    ADD,
+    SUB,
+    MUL,
+    DIV,
+    NEG,
+    NOT,
+    EQ,
+    NEQ,
+    LT,
+    LTE,
+    GT,
+    GTE,
+    MAKE_ARRAY,
+    ARRAY_GET,
+    ARRAY_LOAD,
+    ARRAY_STORE,
+    ARRAY_SET,
+    HALT
+}
