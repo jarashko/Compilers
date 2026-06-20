@@ -1,8 +1,5 @@
 # Compilers — micro language
 
-Учебный компилятор для небольшого языка **micro**: лексер, парсер, AST, семантический анализ, оптимизации на AST, tree-walking интерпретатор и собственное промежуточное представление **LLMR**.
-
-Проект по структуре близок к [compilLab](https://github.com/Ran4er/compilLab), но вместо LLVM IR используется **LLMR** (Low-Level Micro Representation).
 
 ---
 
